@@ -24,6 +24,9 @@ echo "  Pure Hebbian learning on cortical columns."
 echo "============================================================"
 echo ""
 
+# --- Auto-detect python command ---
+PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "python3")
+
 # --- Configuration (override with environment variables) ---
 CONFIG="${CONFIG:-large}"
 PASSES="${PASSES:-3}"
@@ -33,21 +36,29 @@ CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-500}"
 
 # --- Step 1: Install dependencies ---
 echo "[1/3] Installing dependencies..."
-pip install -q -r requirements.txt
+if [ -f requirements.txt ]; then
+    pip install -q -r requirements.txt
+else
+    echo "  WARNING: requirements.txt not found, installing manually"
+    pip install -q "torch>=2.0.0" "datasets>=2.14.0"
+fi
 echo "  Done"
 
 # --- Step 2: Pre-download Wikipedia ---
 echo ""
 echo "[2/3] Downloading Wikipedia (6.7M articles, ~20GB)..."
 echo "  Cached after first download — instant on subsequent runs"
-python3 download_wiki.py
+"$PYTHON" download_wiki.py
 echo "  Done"
 
 # --- Step 3: Detect GPUs and start training ---
 echo ""
 echo "[3/3] Starting training..."
 
-NUM_GPUS=$(python3 -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo "0")
+NUM_GPUS=$("$PYTHON" -c "import torch; print(torch.cuda.device_count())" 2>/dev/null | tail -1 || echo "0")
+NUM_GPUS="${NUM_GPUS//[^0-9]/}"
+NUM_GPUS="${NUM_GPUS:-0}"
+
 echo "  GPUs detected: $NUM_GPUS"
 echo "  Config: $CONFIG"
 echo "  Passes: $PASSES"
@@ -56,33 +67,32 @@ echo "  Checkpoint dir: $CHECKPOINT_DIR"
 echo "  Checkpoint every: $CHECKPOINT_EVERY steps"
 echo ""
 
-TRAIN_ARGS="--config $CONFIG --passes $PASSES --batch-size $BATCH_SIZE --checkpoint-dir $CHECKPOINT_DIR --checkpoint-every $CHECKPOINT_EVERY"
+TRAIN_ARGS=(--config "$CONFIG" --passes "$PASSES" --batch-size "$BATCH_SIZE" --checkpoint-dir "$CHECKPOINT_DIR" --checkpoint-every "$CHECKPOINT_EVERY")
 
 # Resume from latest checkpoint if it exists
 if [ -f "$CHECKPOINT_DIR/cortex_latest.pt" ]; then
     echo "  Found existing checkpoint — resuming training"
-    TRAIN_ARGS="$TRAIN_ARGS --resume $CHECKPOINT_DIR/cortex_latest.pt"
+    TRAIN_ARGS+=(--resume "$CHECKPOINT_DIR/cortex_latest.pt")
 fi
 
 if [ "$NUM_GPUS" -ge 2 ]; then
     echo "  Multi-GPU mode: $NUM_GPUS GPUs with weight sync"
     echo ""
-    torchrun --nproc_per_node=$NUM_GPUS train.py $TRAIN_ARGS
+    torchrun --nproc_per_node="$NUM_GPUS" train.py "${TRAIN_ARGS[@]}"
 elif [ "$NUM_GPUS" -eq 1 ]; then
     echo "  Single GPU mode"
     echo ""
-    python3 train.py $TRAIN_ARGS
+    "$PYTHON" train.py "${TRAIN_ARGS[@]}"
 else
     echo "  WARNING: No GPU detected — training on CPU (very slow)"
-    echo "  Using 'small' config for CPU"
+    echo "  Overriding to 'small' config and batch-size 32 for CPU"
     echo ""
-    python3 train.py --config small --passes $PASSES --batch-size 32 \
-        --checkpoint-dir $CHECKPOINT_DIR --checkpoint-every $CHECKPOINT_EVERY
+    "$PYTHON" train.py "${TRAIN_ARGS[@]}" --config small --batch-size 32
 fi
 
 echo ""
 echo "============================================================"
 echo "  Training complete!"
 echo "  Checkpoint: $CHECKPOINT_DIR/cortex_latest.pt"
-echo "  Start chat: python3 server.py --checkpoint $CHECKPOINT_DIR/cortex_latest.pt --config $CONFIG"
+echo "  Start chat: $PYTHON server.py --checkpoint $CHECKPOINT_DIR/cortex_latest.pt --config $CONFIG"
 echo "============================================================"

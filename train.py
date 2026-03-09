@@ -211,7 +211,7 @@ def train_wikipedia_hf(cortex, args, rank, world_size, device, start_pass):
     log(rank, f"\n  Training complete. {cortex.step_count:,} steps in {fmt_time(total_time)}")
 
 
-def train_wiki_files(cortex, args, rank, world_size, device):
+def train_wiki_files(cortex, args, rank, world_size, device, start_pass=0):
     """Train on wikiextractor output directory."""
     all_files = load_wiki_files(args.data_dir)
     if not all_files:
@@ -222,7 +222,7 @@ def train_wiki_files(cortex, args, rank, world_size, device):
     log(rank, f"  Found {len(all_files)} wiki files in {args.data_dir}")
     training_start = time.time()
 
-    for pass_num in range(1, args.passes + 1):
+    for pass_num in range(start_pass + 1, args.passes + 1):
         log(rank, f"\n{'='*60}")
         log(rank, f"  PASS {pass_num}/{args.passes}")
         log(rank, f"{'='*60}")
@@ -273,7 +273,7 @@ def train_wiki_files(cortex, args, rank, world_size, device):
     log(rank, f"\n  Training complete. {cortex.step_count:,} steps in {fmt_time(total_time)}")
 
 
-def train_single_file(cortex, args, rank, world_size, device):
+def train_single_file(cortex, args, rank, world_size, device, start_pass=0):
     """Train on a single text file."""
     log(rank, f"  Loading {args.data}")
     with open(args.data, "r", encoding="utf-8") as f:
@@ -288,7 +288,7 @@ def train_single_file(cortex, args, rank, world_size, device):
         text = text[start:end]
         log(rank, f"  GPU {rank}: chars [{start:,}..{end:,}]")
 
-    for pass_num in range(1, args.passes + 1):
+    for pass_num in range(start_pass + 1, args.passes + 1):
         t0 = time.time()
         acc = cortex.feed_text(text, batch_size=args.batch_size)
         elapsed = time.time() - t0
@@ -405,10 +405,10 @@ def main():
     # --- Train ---
     if args.data:
         log(rank, f"\n  Mode: single file ({args.data})")
-        train_single_file(cortex, args, rank, world_size, device)
+        train_single_file(cortex, args, rank, world_size, device, start_pass)
     elif args.data_dir:
         log(rank, f"\n  Mode: wiki files ({args.data_dir})")
-        train_wiki_files(cortex, args, rank, world_size, device)
+        train_wiki_files(cortex, args, rank, world_size, device, start_pass)
     else:
         log(rank, f"\n  Mode: Wikipedia (HuggingFace datasets)")
         train_wikipedia_hf(cortex, args, rank, world_size, device, start_pass)

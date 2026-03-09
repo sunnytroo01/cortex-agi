@@ -172,7 +172,8 @@ class CorticalRegion(torch.nn.Module):
         return activation
 
     @torch.no_grad()
-    def learn(self, x_input: torch.Tensor, activations: torch.Tensor, errors: torch.Tensor):
+    def learn(self, x_input: torch.Tensor, activations: torch.Tensor,
+              errors: torch.Tensor, x_context: torch.Tensor = None):
         """Hebbian learning + decay. Norm clamping deferred to maintain()."""
         cfg = self.config
         batched = x_input.dim() == 2
@@ -190,6 +191,14 @@ class CorticalRegion(torch.nn.Module):
         self.W_ff.data.add_(hebbian, alpha=cfg.lr_hebbian)
         self.W_pred.data.add_(pred_update, alpha=cfg.lr_predict)
 
+        # Context learning (prevents W_ctx from decaying to zero)
+        if x_context is not None:
+            if batched:
+                ctx_hebbian = torch.einsum('bd,bcn->cdn', x_context, activations) / B
+            else:
+                ctx_hebbian = x_context.unsqueeze(0).unsqueeze(-1) * activations.unsqueeze(1)
+            self.W_ctx.data.add_(ctx_hebbian, alpha=cfg.lr_hebbian)
+
         # Decay
         self.W_ff.data *= cfg.decay
         self.W_ctx.data *= cfg.decay
@@ -206,6 +215,8 @@ class CorticalRegion(torch.nn.Module):
         max_norm = 2.0
         ff_norm = self.W_ff.data.norm(dim=1, keepdim=True).clamp(min=1e-6)
         self.W_ff.data *= (max_norm / ff_norm).clamp(max=1.0)
+        ctx_norm = self.W_ctx.data.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        self.W_ctx.data *= (max_norm / ctx_norm).clamp(max=1.0)
         pred_norm = self.W_pred.data.norm(dim=2, keepdim=True).clamp(min=1e-6)
         self.W_pred.data *= (max_norm / pred_norm).clamp(max=1.0)
 
@@ -224,6 +235,8 @@ class Cortex(torch.nn.Module):
         super().__init__()
         self.config = config
 
+        assert config.n_columns % config.n_regions == 0, \
+            f"n_columns ({config.n_columns}) must be divisible by n_regions ({config.n_regions})"
         cols_per_region = config.n_columns // config.n_regions
         self.cols_per_region = cols_per_region
 
@@ -275,7 +288,7 @@ class Cortex(torch.nn.Module):
     def encode_text(self, text: str) -> torch.Tensor:
         """Byte-level text encoding — no tokenizer needed."""
         raw = list(text.encode('utf-8'))
-        indices = torch.tensor(raw, dtype=torch.long, device=self.config.device)
+        indices = torch.tensor(raw, dtype=torch.long, device=self.byte_embed.device)
         return self.byte_embed[indices]
 
     def process_batch(self, byte_embeddings: torch.Tensor) -> tuple:
@@ -289,7 +302,7 @@ class Cortex(torch.nn.Module):
         current_input = byte_embeddings
         for region_idx, region in enumerate(self.regions):
             acts, preds, errs = region(current_input, ctx)
-            region.learn(current_input, acts, errs)
+            region.learn(current_input, acts, errs, x_context=ctx)
             region_act = acts.mean(dim=1)
 
             if region_idx < cfg.n_regions - 1:
@@ -297,8 +310,12 @@ class Cortex(torch.nn.Module):
                 ctx = region_act @ self.region_down[region_idx]
 
         top_act = region_act
+        # Update memory with _mem_sum tracking (was missing before)
         ptr = self.mem_ptr.item()
-        self.memory[ptr] = top_act.detach().mean(dim=0)
+        batch_mean = top_act.detach().mean(dim=0)
+        old_val = self.memory[ptr]
+        self._mem_sum += batch_mean - old_val
+        self.memory[ptr] = batch_mean
         self.mem_ptr = (self.mem_ptr + 1) % cfg.seq_memory
 
         logits = top_act @ self.W_decode
@@ -323,7 +340,7 @@ class Cortex(torch.nn.Module):
         for region_idx, region in enumerate(self.regions):
             acts, preds, errs = region(current_input, ctx)
             if learning:
-                region.learn(current_input, acts, errs)
+                region.learn(current_input, acts, errs, x_context=ctx)
             region_act = acts.mean(dim=0)
 
             if region_idx < cfg.n_regions - 1:
@@ -371,7 +388,7 @@ class Cortex(torch.nn.Module):
     def learn_decoder_batch(self, activations: torch.Tensor, next_byte_indices: torch.Tensor):
         cfg = self.config
         B = activations.shape[0]
-        targets = torch.zeros(B, cfg.vocab_size, device=cfg.device)
+        targets = torch.zeros(B, cfg.vocab_size, device=activations.device)
         targets.scatter_(1, next_byte_indices.unsqueeze(1), 1.0)
         update = torch.einsum('bn,bv->nv', activations, targets) / B
         self.W_decode.data.add_(update, alpha=cfg.lr_decode)
@@ -380,7 +397,7 @@ class Cortex(torch.nn.Module):
     @torch.no_grad()
     def learn_decoder(self, activation: torch.Tensor, next_byte_idx: int):
         cfg = self.config
-        target = torch.zeros(cfg.vocab_size, device=cfg.device)
+        target = torch.zeros(cfg.vocab_size, device=activation.device)
         target[next_byte_idx] = 1.0
         update = activation.unsqueeze(1) * target.unsqueeze(0)
         self.W_decode.data.add_(update, alpha=cfg.lr_decode)
@@ -434,7 +451,7 @@ class Cortex(torch.nn.Module):
             batch_emb = embeddings[start:end]
             batch_targets = raw[start + 1:end + 1]
             activations, logits = self.process_batch(batch_emb)
-            target_tensor = torch.tensor(batch_targets, dtype=torch.long, device=self.config.device)
+            target_tensor = torch.tensor(batch_targets, dtype=torch.long, device=self.byte_embed.device)
             self.learn_decoder_batch(activations.detach(), target_tensor)
             predicted = torch.argmax(logits, dim=-1)
             total_correct += (predicted == target_tensor).sum().item()
@@ -451,24 +468,27 @@ class Cortex(torch.nn.Module):
 
     def generate(self, prompt: str, max_bytes: int = 200, temperature: float = 1.0) -> str:
         """Generate text — no learning during generation."""
+        if not prompt:
+            return ""
+
         embeddings = self.encode_text(prompt)
         for emb in embeddings:
             activation, logits = self.process_byte(emb, learning=False)
 
         generated = []
         for _ in range(max_bytes):
-            probs = F.softmax(logits / temperature, dim=-1)
-            next_byte = torch.multinomial(probs, 1).item()
+            if temperature <= 0:
+                next_byte = torch.argmax(logits).item()
+            else:
+                probs = F.softmax(logits / temperature, dim=-1)
+                next_byte = torch.multinomial(probs, 1).item()
             if next_byte == 0:
                 break
             generated.append(next_byte)
             next_emb = self.byte_embed[next_byte]
             activation, logits = self.process_byte(next_emb, learning=False)
 
-        try:
-            return bytes(generated).decode('utf-8', errors='replace')
-        except Exception:
-            return bytes(generated).decode('latin-1', errors='replace')
+        return bytes(generated).decode('utf-8', errors='replace')
 
     def num_parameters(self):
         return sum(p.numel() for p in self.parameters())
@@ -501,8 +521,7 @@ class Cortex(torch.nn.Module):
         """Load model from checkpoint."""
         checkpoint = torch.load(path, map_location=device or 'cpu', weights_only=False)
         cfg_dict = checkpoint['config']
-        if device:
-            cfg_dict['device'] = device
+        cfg_dict['device'] = device if device else 'cpu'
         config = CortexConfig(**{k: v for k, v in cfg_dict.items()
                                  if k in CortexConfig.__dataclass_fields__})
         cortex = cls(config).to(config.device)
@@ -516,12 +535,16 @@ class Cortex(torch.nn.Module):
 
         Unlike gradient-based DDP, Hebbian learning modifies weights directly.
         This averages parameters across GPUs to keep models in sync.
+        Memory buffers are excluded (each GPU has its own temporal context).
         """
         import torch.distributed as dist
         for param in self.parameters():
             dist.all_reduce(param.data, op=dist.ReduceOp.AVG)
+        # Sync homeostasis buffers, but NOT per-GPU memory state
+        skip = {'memory', '_mem_sum', 'mem_ptr'}
         for name, buf in self.named_buffers():
-            if buf.is_floating_point():
+            short_name = name.split('.')[-1]
+            if buf.is_floating_point() and short_name not in skip:
                 dist.all_reduce(buf.data, op=dist.ReduceOp.AVG)
 
     def reset_memory(self):

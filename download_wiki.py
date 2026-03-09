@@ -104,10 +104,13 @@ def _download_file(url, dest):
 
         def _progress(count, block_size, total_size):
             downloaded = count * block_size
-            pct = downloaded / total_size * 100 if total_size > 0 else 0
             gb = downloaded / (1024 ** 3)
-            total_gb = total_size / (1024 ** 3)
-            sys.stdout.write(f"\r  {gb:.1f}/{total_gb:.1f} GB ({pct:.1f}%)")
+            if total_size > 0:
+                pct = downloaded / total_size * 100
+                total_gb = total_size / (1024 ** 3)
+                sys.stdout.write(f"\r  {gb:.1f}/{total_gb:.1f} GB ({pct:.1f}%)")
+            else:
+                sys.stdout.write(f"\r  {gb:.1f} GB downloaded")
             sys.stdout.flush()
 
         urllib.request.urlretrieve(url, dest, reporthook=_progress)

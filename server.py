@@ -63,8 +63,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/api/chat":
             try:
                 length = int(self.headers.get("Content-Length", 0))
+                if length == 0 or length > 1_000_000:
+                    self._json_response(400, {"error": "Invalid Content-Length"})
+                    return
                 body = json.loads(self.rfile.read(length))
-                prompt = body.get("message", "")
+                prompt = body.get("message", "")[:10_000]
 
                 cortex.feed_text(prompt)
                 response = cortex.generate(prompt, max_bytes=300, temperature=0.8)
@@ -80,8 +83,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/feed":
             try:
                 length = int(self.headers.get("Content-Length", 0))
+                if length == 0 or length > 1_000_000:
+                    self._json_response(400, {"error": "Invalid Content-Length"})
+                    return
                 body = json.loads(self.rfile.read(length))
-                text = body.get("text", "")
+                text = body.get("text", "")[:50_000]
                 repeats = min(body.get("repeats", 5), 50)
 
                 t0 = time.time()
