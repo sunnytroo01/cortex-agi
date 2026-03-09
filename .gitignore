@@ -4,6 +4,8 @@ __pycache__/
 checkpoints/
 data/words_raw.txt
 data/training_corpus.txt
+data/wiki/
+data/enwiki-*.xml.bz2
 .env
 *.egg-info/
 dist/

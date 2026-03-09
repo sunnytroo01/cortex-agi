@@ -510,6 +510,26 @@ class Cortex(torch.nn.Module):
         cortex.step_count = checkpoint.get('steps', 0)
         return cortex
 
+    @torch.no_grad()
+    def sync_weights(self):
+        """Average all weights across GPUs for distributed Hebbian learning.
+
+        Unlike gradient-based DDP, Hebbian learning modifies weights directly.
+        This averages parameters across GPUs to keep models in sync.
+        """
+        import torch.distributed as dist
+        for param in self.parameters():
+            dist.all_reduce(param.data, op=dist.ReduceOp.AVG)
+        for name, buf in self.named_buffers():
+            if buf.is_floating_point():
+                dist.all_reduce(buf.data, op=dist.ReduceOp.AVG)
+
+    def reset_memory(self):
+        """Reset sequence memory buffer (call between unrelated documents)."""
+        self.memory.zero_()
+        self._mem_sum.zero_()
+        self.mem_ptr.zero_()
+
 
 if __name__ == "__main__":
     print("=" * 50)

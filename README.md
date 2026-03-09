@@ -1,6 +1,6 @@
 # Cortex AGI
 
-A brain-inspired artificial general intelligence built on cortical column architecture with Hebbian learning.
+A brain-inspired artificial general intelligence trained on all of Wikipedia using cortical column architecture and Hebbian learning.
 
 **Not a transformer. Not backpropagation. Not gradient descent.**
 
@@ -10,6 +10,22 @@ Cortex AGI uses the same principles as the biological neocortex:
 - **Sparse distributed representations** — only ~5% of neurons active at any time
 - **Predictive coding** — columns predict their input and learn from errors
 - **Online learning** — learns from every input, no training/inference split
+
+## One Command Training
+
+Clone the repo on your GPU machine and run:
+
+```bash
+git clone https://github.com/sunnytroo01/cortex-agi.git
+cd cortex-agi
+bash run.sh
+```
+
+That's it. The script:
+1. Installs dependencies
+2. Downloads all of English Wikipedia (6.7M articles, ~20GB, cached after first run)
+3. Trains on every GPU it finds using distributed Hebbian learning
+4. Checkpoints every 500 steps — no progress is ever lost
 
 ## Architecture
 
@@ -21,28 +37,42 @@ Input (bytes) → Embedding → Region 1 → Region 2 → ... → Region N → D
 
 Each region contains hundreds of cortical columns processed in parallel. Each column independently learns features through local Hebbian rules — no global loss function needed.
 
-## Quick Start
+## Training
+
+### Default: Wikipedia via HuggingFace (recommended)
 
 ```bash
-# Install
-pip install -r requirements.txt
+bash run.sh                                    # auto-detect GPUs, train on Wikipedia
+CONFIG=xl PASSES=10 bash run.sh                # override settings
+CHECKPOINT_DIR=/mnt/storage/ckpts bash run.sh  # custom checkpoint path
+```
 
-# Build training data (100K English words + grammar rules)
-python data/build_corpus.py
+### Manual commands
 
-# Train (small config for testing)
-python train.py --config small
-
-# Train on B200 (single GPU)
+```bash
+# Single GPU
 python train.py --config large
 
-# Train on multiple B200s
-torchrun --nproc_per_node=4 train.py --config large
+# Multi-GPU (e.g., 2x B200)
+torchrun --nproc_per_node=2 train.py --config large
 
-# Chat UI
-python server.py
-# Open http://localhost:5000
+# Resume from checkpoint
+python train.py --resume checkpoints/cortex_latest.pt
+
+# Custom text file
+python train.py --data myfile.txt --config small
+
+# Wiki files from wikiextractor
+python download_wiki.py --method dump
+python train.py --data-dir data/wiki
 ```
+
+### Multi-GPU Hebbian Learning
+
+Unlike transformer DDP which syncs gradients, Cortex AGI uses **periodic model averaging** for distributed Hebbian learning:
+- Each GPU processes a different shard of Wikipedia
+- At the end of each pass, weights are averaged across all GPUs
+- This gives N-GPU throughput while maintaining a single coherent model
 
 ## Model Sizes
 
@@ -53,13 +83,23 @@ python server.py
 | large  | 1024    | 1M      | ~800M  | ~20 GB     |
 | xl     | 2048    | 4M      | ~6B    | ~150 GB    |
 
-## Training Data
+## Checkpointing
 
-The training corpus includes:
-- **62,920 unique English words** from Wiktionary frequency lists
-- **Comprehensive grammar rules** — parts of speech, tenses, sentence structure, punctuation, word formation, spelling rules
-- **Dialogue examples** — conversational patterns
-- **High-frequency reinforcement** — common patterns repeated for Hebbian learning
+Every 500 training steps, a checkpoint is saved automatically. Checkpoints are also saved:
+- After every training pass over the full dataset
+- On Ctrl+C (graceful interrupt)
+- As both numbered (`cortex_pass_0001.pt`) and latest (`cortex_latest.pt`)
+
+Training auto-resumes from the latest checkpoint if one exists.
+
+## Chat UI
+
+After training, start the web server:
+
+```bash
+python server.py --checkpoint checkpoints/cortex_latest.pt --config large
+# Open http://localhost:5000
+```
 
 ## How It Works
 
