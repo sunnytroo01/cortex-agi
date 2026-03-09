@@ -33,7 +33,7 @@ CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-500}"
 
 # --- Step 1: Install dependencies ---
 echo "[1/3] Installing dependencies..."
-pip install -q torch>=2.0.0 datasets>=2.14.0
+pip install -q -r requirements.txt
 echo "  Done"
 
 # --- Step 2: Pre-download Wikipedia ---
