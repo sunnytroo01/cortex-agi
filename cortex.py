@@ -28,19 +28,19 @@ class CortexConfig:
 
     Presets:
     - 'small':  32 cols,  256 neurons, 4 regions — dev/testing (~3M params)
-    - 'medium': 256 cols, 512 neurons, 6 regions — single GPU (~50M params)
-    - 'large':  1024 cols, 1024 neurons, 8 regions — B200 single (~800M params)
-    - 'xl':     2048 cols, 2048 neurons, 8 regions — B200 multi (~6B params)
+    - 'medium': 128 cols, 384 neurons, 4 regions — single GPU (~30M params)
+    - 'large':  256 cols, 512 neurons, 4 regions — one GPU (~100M params)
+    - 'xl':     512 cols, 1024 neurons, 4 regions — multi-GPU (~800M params)
     """
     # Column dimensions
-    n_neurons: int = 1024         # neurons per column
-    n_active: int = 48            # ~5% sparsity
-    input_dim: int = 512          # input feature size
-    context_dim: int = 512        # feedback/context feature size
+    n_neurons: int = 512          # neurons per column
+    n_active: int = 24            # ~5% sparsity
+    input_dim: int = 256          # input feature size
+    context_dim: int = 256        # feedback/context feature size
 
     # Network topology
-    n_columns: int = 1024         # total columns
-    n_regions: int = 8            # hierarchical regions
+    n_columns: int = 256          # total columns
+    n_regions: int = 4            # hierarchical regions
 
     # Hebbian learning
     lr_hebbian: float = 0.01
@@ -55,6 +55,7 @@ class CortexConfig:
     seq_memory: int = 256         # sequence memory slots
 
     # Performance
+    chunk_size: int = 1           # bytes per chunk (1=byte-level, 32+=fast training)
     maintain_interval: int = 100  # norm clamping every N steps
     dtype: str = "float32"        # float32 or bfloat16
 
@@ -68,23 +69,24 @@ class CortexConfig:
 
     @classmethod
     def medium(cls, **kw):
-        return cls(n_columns=256, n_neurons=512, n_active=24,
-                   input_dim=256, context_dim=256, n_regions=6,
-                   seq_memory=256, **kw)
+        """~30M params, single GPU."""
+        return cls(n_columns=128, n_neurons=384, n_active=18,
+                   input_dim=192, context_dim=192, n_regions=4,
+                   seq_memory=256, chunk_size=16, **kw)
 
     @classmethod
     def large(cls, **kw):
-        """~800M params, fits on one B200."""
-        return cls(n_columns=1024, n_neurons=1024, n_active=48,
-                   input_dim=512, context_dim=512, n_regions=8,
-                   seq_memory=256, **kw)
+        """~100M params, one GPU. chunk_size=32 for fast Wikipedia training."""
+        return cls(n_columns=256, n_neurons=512, n_active=24,
+                   input_dim=256, context_dim=256, n_regions=4,
+                   seq_memory=256, chunk_size=32, **kw)
 
     @classmethod
     def xl(cls, **kw):
-        """~6B params, for multi-B200."""
-        return cls(n_columns=2048, n_neurons=2048, n_active=96,
-                   input_dim=1024, context_dim=1024, n_regions=8,
-                   seq_memory=512, **kw)
+        """~800M params, multi-GPU. chunk_size=64 for fast Wikipedia training."""
+        return cls(n_columns=512, n_neurons=1024, n_active=48,
+                   input_dim=512, context_dim=512, n_regions=4,
+                   seq_memory=512, chunk_size=64, **kw)
 
 
 class CorticalRegion(torch.nn.Module):
@@ -443,22 +445,44 @@ class Cortex(torch.nn.Module):
         if len(raw) < 2:
             return 0.0
         embeddings = self.encode_text(text)
+        dev = self.byte_embed.device
         total_correct = 0
         total = 0
+        cs = self.config.chunk_size
 
-        for start in range(0, len(raw) - 1, batch_size):
-            end = min(start + batch_size, len(raw) - 1)
-            batch_emb = embeddings[start:end]
-            batch_targets = raw[start + 1:end + 1]
-            activations, logits = self.process_batch(batch_emb)
-            target_tensor = torch.tensor(batch_targets, dtype=torch.long, device=self.byte_embed.device)
-            self.learn_decoder_batch(activations.detach(), target_tensor)
-            predicted = torch.argmax(logits, dim=-1)
-            total_correct += (predicted == target_tensor).sum().item()
-            total += len(batch_targets)
+        if cs > 1 and len(raw) >= cs * 2:
+            # Chunk encoding: average cs byte embeddings into one "percept"
+            # Like how sensory cortex processes receptive fields, not raw stimuli
+            n_chunks = len(raw) // cs
+            usable = n_chunks * cs
+            chunks = embeddings[:usable].view(n_chunks, cs, -1).mean(dim=1)
 
-            if verbose and total > 0 and start % (batch_size * 50) == 0:
-                print(f"    byte {start:,}/{len(raw):,} | acc: {total_correct/total*100:.1f}%")
+            for start in range(0, n_chunks - 1, batch_size):
+                end = min(start + batch_size, n_chunks - 1)
+                batch_emb = chunks[start:end]
+                # Target: first byte of the next chunk
+                batch_targets = [raw[(start + j + 1) * cs] for j in range(end - start)]
+                activations, logits = self.process_batch(batch_emb)
+                target_tensor = torch.tensor(batch_targets, dtype=torch.long, device=dev)
+                self.learn_decoder_batch(activations.detach(), target_tensor)
+                predicted = torch.argmax(logits, dim=-1)
+                total_correct += (predicted == target_tensor).sum().item()
+                total += len(batch_targets)
+        else:
+            # Byte-level (original path, for small texts or chunk_size=1)
+            for start in range(0, len(raw) - 1, batch_size):
+                end = min(start + batch_size, len(raw) - 1)
+                batch_emb = embeddings[start:end]
+                batch_targets = raw[start + 1:end + 1]
+                activations, logits = self.process_batch(batch_emb)
+                target_tensor = torch.tensor(batch_targets, dtype=torch.long, device=dev)
+                self.learn_decoder_batch(activations.detach(), target_tensor)
+                predicted = torch.argmax(logits, dim=-1)
+                total_correct += (predicted == target_tensor).sum().item()
+                total += len(batch_targets)
+
+                if verbose and total > 0 and start % (batch_size * 50) == 0:
+                    print(f"    byte {start:,}/{len(raw):,} | acc: {total_correct/total*100:.1f}%")
 
         if self._steps_since_maintain > 0:
             for r in self.regions:

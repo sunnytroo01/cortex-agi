@@ -158,14 +158,15 @@ def train_wikipedia_hf(cortex, args, rank, world_size, device, start_pass):
             if len(text) < 100:
                 continue
 
+            cortex.reset_memory()
             acc = cortex.feed_text(text, batch_size=args.batch_size)
             n_bytes = len(text.encode("utf-8"))
             pass_bytes += n_bytes
             pass_weighted_acc += acc * n_bytes / 100.0
             articles_done += 1
 
-            # Progress every 1000 articles
-            if articles_done % 1000 == 0:
+            # Progress: first article, then every 100 articles
+            if articles_done == 1 or articles_done % 100 == 0:
                 elapsed = time.time() - pass_start
                 bps = pass_bytes / max(elapsed, 0.001)
                 overall_acc = pass_weighted_acc / max(pass_bytes, 1) * 100.0

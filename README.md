@@ -76,12 +76,14 @@ Unlike transformer DDP which syncs gradients, Cortex AGI uses **periodic model a
 
 ## Model Sizes
 
-| Config | Columns | Neurons | Params | GPU Memory |
-|--------|---------|---------|--------|------------|
-| small  | 32      | 8K      | ~3M    | < 1 GB     |
-| medium | 256     | 128K    | ~50M   | ~2 GB      |
-| large  | 1024    | 1M      | ~800M  | ~20 GB     |
-| xl     | 2048    | 4M      | ~6B    | ~150 GB    |
+| Config | Columns | Neurons | Regions | Chunk Size | Params | GPU Memory |
+|--------|---------|---------|---------|------------|--------|------------|
+| small  | 32      | 8K      | 4       | 1 (byte)   | ~3M    | < 1 GB     |
+| medium | 128     | 49K     | 4       | 16 bytes   | ~30M   | ~1 GB      |
+| large  | 256     | 128K    | 4       | 32 bytes   | ~100M  | ~3 GB      |
+| xl     | 512     | 512K    | 4       | 64 bytes   | ~800M  | ~20 GB     |
+
+Chunk encoding groups N bytes into one "percept" (like sensory receptive fields in the brain). This makes Wikipedia-scale training 30-60x faster while preserving the same learning principles.
 
 ## Checkpointing
 
