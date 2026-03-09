@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AGI Cortex</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #000000;
+      --surface: #0a0a0a;
+      --surface-2: #141414;
+      --surface-3: #1e1e1e;
+      --border: #1e1e1e;
+      --text: #e0e0e0;
+      --text-2: #777777;
+      --text-3: #444444;
+      --accent: #ffffff;
+      --accent-soft: rgba(255, 255, 255, 0.06);
+      --radius: 16px;
+      --radius-lg: 24px;
+      --radius-full: 9999px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Layout */
+    .app {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top bar */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      flex-shrink: 0;
+    }
+
+    /* Chat area */
+    .chat-area {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-area::-webkit-scrollbar { width: 0; }
+
+    /* Welcome */
+    .welcome {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      padding: 40px 24px;
+      animation: welcomeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes welcomeIn {
+      from { opacity: 0; transform: translateY(20px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .welcome-mark {
+      width: 64px;
+      height: 64px;
+      border-radius: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-3);
+    }
+
+    .welcome h1 {
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: -1px;
+      color: #ffffff;
+    }
+
+    .welcome h1 span {
+      font-weight: 400;
+      color: var(--text-2);
+    }
+
+    .welcome-sub {
+      color: var(--text-3);
+      font-size: 14px;
+      line-height: 1.5;
+      text-align: center;
+      max-width: 340px;
+    }
+
+    .suggestions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+      max-width: 440px;
+      width: 100%;
+    }
+
+    .suggestion {
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      font-size: 13px;
+      font-weight: 400;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+    }
+
+    .suggestion:hover {
+      background: var(--surface-2);
+      border-color: var(--surface-3);
+      color: var(--text);
+      transform: translateY(-2px);
+    }
+
+    .suggestion:active { transform: translateY(0) scale(0.98); }
+
+    .suggestion-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background: var(--surface-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--text-3);
+      transition: all 0.25s ease;
+    }
+
+    .suggestion:hover .suggestion-icon { color: #ffffff; background: rgba(255,255,255,0.08); }
+
+    /* Messages */
+    .messages-list {
+      max-width: 680px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .msg {
+      padding: 16px 0;
+      display: flex;
+      gap: 14px;
+      animation: msgSlide 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes msgSlide {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+
+    .msg-avatar.user { background: var(--surface-2); color: var(--text-3); }
+    .msg-avatar.ai { background: rgba(255,255,255,0.08); color: #ffffff; }
+
+    .msg-body { flex: 1; min-width: 0; }
+
+    .msg-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-2);
+      margin-bottom: 5px;
+      letter-spacing: 0.2px;
+    }
+
+    .msg-text {
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text);
+    }
+
+    .msg-text p + p { margin-top: 10px; }
+
+    .msg + .msg { border-top: 1px solid var(--border); }
+
+    /* Typing */
+    .typing {
+      display: flex;
+      gap: 5px;
+      padding: 6px 0;
+    }
+
+    .typing span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--text-3);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    .typing span:nth-child(2) { animation-delay: 0.16s; }
+    .typing span:nth-child(3) { animation-delay: 0.32s; }
+
+    @keyframes pulse {
+      0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
+      40% { opacity: 1; transform: scale(1.3); }
+    }
+
+    /* Input */
+    .input-wrap {
+      padding: 12px 24px 28px;
+      flex-shrink: 0;
+    }
+
+    .input-box {
+      max-width: 680px;
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 8px 8px 8px 20px;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .input-box:focus-within {
+      border-color: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 0 0 4px rgba(255,255,255,0.03), 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    #input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+      padding: 8px 0;
+      resize: none;
+      max-height: 140px;
+      line-height: 1.5;
+    }
+
+    #input::placeholder { color: var(--text-3); }
+
+    .input-actions {
+      display: flex;
+      gap: 4px;
+      padding-bottom: 2px;
+    }
+
+    .send-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      border: none;
+      background: #ffffff;
+      color: #000000;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      opacity: 0;
+      transform: scale(0.8);
+      pointer-events: none;
+    }
+
+    .send-btn.show {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+    }
+
+    .send-btn.show:hover { transform: scale(1.08); background: #e0e0e0; }
+    .send-btn.show:active { transform: scale(0.94); }
+
+    .bottom-hint {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-3);
+      margin-top: 10px;
+    }
+
+    /* Brain stats bar */
+    .brain-stats {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      padding: 8px 20px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-3);
+      font-family: 'SF Mono', 'Consolas', monospace;
+      flex-shrink: 0;
+    }
+
+    .brain-stats .stat-label { color: var(--text-3); }
+    .brain-stats .stat-val { color: #ffffff; font-weight: 600; }
+
+    .learn-indicator {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ffffff;
+      margin-right: 4px;
+      animation: learnPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes learnPulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+
+    /* Scrollbar fallback */
+    ::-webkit-scrollbar { width: 0; }
+
+    @media (max-width: 600px) {
+      .suggestions { grid-template-columns: 1fr; }
+      .topbar { padding: 12px 16px; }
+      .input-wrap { padding: 8px 12px 20px; }
+      .messages-list { padding: 0 16px; }
+      .welcome h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app">
+  <div class="topbar">
+  </div>
+
+  <div class="chat-area" id="chatArea">
+    <div class="welcome" id="welcome">
+      <div class="welcome-mark">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <h1>AGI <span>Cortex</span></h1>
+      <p class="welcome-sub">Brain-inspired AI. No transformer. No backprop. Pure Hebbian learning. It learns from every message you send.</p>
+      <div class="suggestions">
+        <button class="suggestion" onclick="useSuggestion('Hello, who are you?')">
+          <div class="suggestion-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          Say hello
+        </button>
+        <button class="suggestion" onclick="useSuggestion('What is the brain?')">
+          <div class="suggestion-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          </div>
+          Ask a question
+        </button>
+        <button class="suggestion" onclick="useSuggestion('Tell me something interesting')">
+          <div class="suggestion-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          </div>
+          Get creative
+        </button>
+        <button class="suggestion" onclick="teachCortex()">
+          <div class="suggestion-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          </div>
+          Teach it text
+        </button>
+      </div>
+    </div>
+    <div class="messages-list" id="messagesList" style="display:none;"></div>
+  </div>
+
+  <div class="input-wrap">
+    <div class="input-box">
+      <textarea id="input" rows="1" placeholder="Ask anything..." oninput="resize(this); toggleBtn()" onkeydown="onKey(event)"></textarea>
+      <div class="input-actions">
+        <button class="send-btn" id="sendBtn" onclick="send()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="bottom-hint">AGI Cortex learns from every message. No backpropagation. Pure Hebbian learning.</div>
+  </div>
+
+  <div class="brain-stats" id="brainStats">
+    <span><span class="learn-indicator"></span> LIVE</span>
+    <span><span class="stat-label">neurons </span><span class="stat-val" id="statNeurons">--</span></span>
+    <span><span class="stat-label">synapses </span><span class="stat-val" id="statSynapses">--</span></span>
+    <span><span class="stat-label">steps </span><span class="stat-val" id="statSteps">--</span></span>
+    <span><span class="stat-label">sparsity </span><span class="stat-val" id="statSparsity">--</span></span>
+  </div>
+</div>
+
+<script>
+  const messages = [];
+
+  async function send() {
+    const el = document.getElementById('input');
+    const text = el.value.trim();
+    if (!text) return;
+
+    document.getElementById('welcome').style.display = 'none';
+    const list = document.getElementById('messagesList');
+    list.style.display = 'flex';
+
+    addMsg('user', text);
+    el.value = '';
+    el.style.height = 'auto';
+    toggleBtn();
+
+    showTyping();
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+      const data = await res.json();
+      hideTyping();
+      if (data.error) {
+        addMsg('ai', 'Model error: ' + data.error);
+      } else {
+        addMsg('ai', data.response);
+        if (data.stats) updateStats(data.stats);
+      }
+    } catch (err) {
+      hideTyping();
+      addMsg('ai', 'Error connecting to model: ' + err.message);
+    }
+  }
+
+  function addMsg(role, text) {
+    messages.push({ role, text });
+    const list = document.getElementById('messagesList');
+    const div = document.createElement('div');
+    div.className = 'msg';
+
+    const isUser = role === 'user';
+    const paragraphs = text.split('\n').filter(p => p.trim()).map(p => `<p>${esc(p)}</p>`).join('');
+
+    div.innerHTML = `
+      <div class="msg-avatar ${role}">
+        ${isUser
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>'
+        }
+      </div>
+      <div class="msg-body">
+        <div class="msg-name">${isUser ? 'You' : 'AGI Cortex'}</div>
+        <div class="msg-text">${paragraphs}</div>
+      </div>
+    `;
+
+    list.appendChild(div);
+    scrollBottom();
+  }
+
+  function showTyping() {
+    const list = document.getElementById('messagesList');
+    const div = document.createElement('div');
+    div.className = 'msg';
+    div.id = 'typing';
+    div.innerHTML = `
+      <div class="msg-avatar ai">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <div class="msg-body">
+        <div class="msg-name">AGI Cortex</div>
+        <div class="typing"><span></span><span></span><span></span></div>
+      </div>
+    `;
+    list.appendChild(div);
+    scrollBottom();
+  }
+
+  function hideTyping() {
+    const el = document.getElementById('typing');
+    if (el) el.remove();
+  }
+
+  function scrollBottom() {
+    const area = document.getElementById('chatArea');
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function clearChat() {
+    messages.length = 0;
+    document.getElementById('messagesList').innerHTML = '';
+    document.getElementById('messagesList').style.display = 'none';
+    document.getElementById('welcome').style.display = 'flex';
+    document.getElementById('input').focus();
+  }
+
+  function useSuggestion(text) {
+    document.getElementById('input').value = text;
+    toggleBtn();
+    send();
+  }
+
+  function resize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  }
+
+  function toggleBtn() {
+    const btn = document.getElementById('sendBtn');
+    document.getElementById('input').value.trim()
+      ? btn.classList.add('show')
+      : btn.classList.remove('show');
+  }
+
+  function onKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  }
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function updateStats(s) {
+    document.getElementById('statNeurons').textContent = Number(s.total_neurons).toLocaleString();
+    document.getElementById('statSynapses').textContent = Number(s.total_synapses).toLocaleString();
+    document.getElementById('statSteps').textContent = Number(s.steps).toLocaleString();
+    document.getElementById('statSparsity').textContent = s.active_pct;
+  }
+
+  async function fetchStats() {
+    try {
+      const res = await fetch('/api/stats');
+      const s = await res.json();
+      updateStats(s);
+    } catch(e) {}
+  }
+
+  async function teachCortex() {
+    const text = prompt('Paste text to teach AGI Cortex (it will learn immediately):');
+    if (!text) return;
+    document.getElementById('welcome').style.display = 'none';
+    const list = document.getElementById('messagesList');
+    list.style.display = 'flex';
+    addMsg('user', '[Teaching] ' + text.substring(0, 100) + (text.length > 100 ? '...' : ''));
+    showTyping();
+    try {
+      const res = await fetch('/api/feed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, repeats: 20 }),
+      });
+      const data = await res.json();
+      hideTyping();
+      addMsg('ai', `Learned! Accuracy: ${data.accuracy}% after ${data.repeats} exposures (${data.time}s). Total steps: ${data.steps.toLocaleString()}`);
+      if (data.stats) updateStats(data.stats);
+    } catch(e) {
+      hideTyping();
+      addMsg('ai', 'Error: ' + e.message);
+    }
+  }
+
+  fetchStats();
+  setInterval(fetchStats, 5000);
+
+  document.getElementById('input').focus();
+</script>
+
+</body>
+</html>

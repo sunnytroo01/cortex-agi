@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pt
+checkpoints/
+data/words_raw.txt
+data/training_corpus.txt
+.env
+*.egg-info/
+dist/
+build/
